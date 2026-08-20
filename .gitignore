@@ -1,0 +1,11 @@
+# .env
+.env
+
+# .venv
+.venv/
+
+# venv
+venv/
+
+# env
+env/
