@@ -1,11 +1,11 @@
 import os
-
+import env
 from celery import Celery
 
 celery_app = Celery(
     "scraper",
-    broker=os.environ.get("CELERY_BROKER_URL", "amqp://guest:guest@rabbitmq:5672//"),
-    backend=os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0"),
+    broker=env.BROKER_URL,
+    backend=env.get_result_backend(),
     include=["app.tasks"],
 )
 
@@ -13,4 +13,5 @@ celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
+    result_extended=True,
 )

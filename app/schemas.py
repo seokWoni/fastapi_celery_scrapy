@@ -8,30 +8,25 @@ class Period(BaseModel):
     end_date: str | None = None
 
 
-class ScraperParam(BaseModel):
+class Param(BaseModel):
     mall_id: str
-    user_id: str
-    goods_ids: list[int] | None = None
+    goods_ids: list[Any] | None = None
 
 
-class ScrapeJob(BaseModel):
+class DoRequest(BaseModel):
     customer_id: str
     customer_name: str
     task_type: Literal["order", "goods"]
     period: Period = Field(default_factory=Period)
-    scraper_params: list[ScraperParam]
-
-
-class DoRequest(BaseModel):
-    order: ScrapeJob
-    goods: ScrapeJob
+    params: list[Param]
 
     @model_validator(mode="after")
-    def validate_task_types(self) -> "DoRequest":
-        if self.order.task_type != "order":
-            raise ValueError("order.task_type must be 'order'")
-        if self.goods.task_type != "goods":
-            raise ValueError("goods.task_type must be 'goods'")
+    def validate_period_by_task_type(self) -> "DoRequest":
+        if self.task_type == "order":
+            if not self.period.start_date or not self.period.end_date:
+                raise ValueError(
+                    "period.start_date and period.end_date are required when task_type is 'order'"
+                )
         return self
 
 

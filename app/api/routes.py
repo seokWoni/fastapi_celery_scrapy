@@ -3,17 +3,14 @@ from fastapi import APIRouter
 
 from app.celery_app import celery_app
 from app.schemas import DoRequest, DoResponse, TaskStatusResponse
-from app.tasks import process_do
+from app.tasks import do_spider
 
 router = APIRouter()
 
 
 @router.post("/do", response_model=DoResponse)
 def do(payload: DoRequest) -> DoResponse:
-    task = process_do.delay(
-        order=payload.order.model_dump(),
-        goods=payload.goods.model_dump(),
-    )
+    task = do_spider.delay(payload.model_dump())
     return DoResponse(task_id=task.id, status=task.status)
 
 
