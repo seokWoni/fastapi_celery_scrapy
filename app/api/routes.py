@@ -1,9 +1,9 @@
 from celery.result import AsyncResult
 from fastapi import APIRouter
 
-from app.celery_app import celery_app
 from app.schemas import DoRequest, DoResponse, TaskStatusResponse
-from app.tasks import do_spider
+from worker.celery_app import celery_app
+from worker.tasks import do_spider
 
 router = APIRouter()
 
