@@ -1,3 +1,6 @@
+import importlib
+import inspect
+
 from copy import deepcopy
 from typing import Any
 
@@ -18,12 +21,17 @@ class RunCrawlerProcess:
     def __init__(self, spider_cls: Any | None = None):
         self.spider_cls = spider_cls
 
-    def crawl(self, params: dict[str, Any]) -> None:
+    def crawl(self, params: dict[str, Any]) -> Process:
         if self.spider_cls is None:
             raise ValueError("spider_cls is required")
-        process = Process(target=_run_crawl, args=(self.spider_cls, params))
+
+        process = Process(
+            target=_run_crawl,
+            args=(self.spider_cls, params),
+        )
         process.start()
-        process.join()
+
+        return process
 
 @celery_app.task(bind=True)
 def do_spider(self, payload: dict[str, Any]):
@@ -36,18 +44,30 @@ def do_spider(self, payload: dict[str, Any]):
     if not spider_params:
         raise ValueError(f"spider_params is required when task_type is {task_type}")
 
-    crawler_process = RunCrawlerProcess(spider_cls=get_spider_cls(mall_id, task_type))
-
-    items: list[dict[str, Any]] = []
-
+    processes = []
     for spider_param in spider_params:
         base_params = deepcopy(payload)
         base_params.pop("spider_params", None)
         base_params["spider_param"] = spider_param
-        crawler_process.crawl(base_params)
+        mall_id = spider_param.get("mall_id", None)
 
-    return items
+        spdier_cls = get_spider_cls(
+            mall_id, 
+            task_type
+        )
 
+        crawler_process = RunCrawlerProcess(
+            spider_cls=spdier_cls
+        )
+        process = crawler_process.crawl(base_params)
+        processes.append(process)
+
+    for process in processes:
+        process.join()
+
+    return payload
+
+# spider class를 가져오는 함수
 def get_spider_cls(mall_id: str, task_type: str) -> Any:
     module_path = f"worker.scrapy.spiders.{mall_id}.{task_type}"
 

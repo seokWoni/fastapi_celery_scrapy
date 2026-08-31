@@ -14,10 +14,6 @@ class BaseSpider(scrapy.Spider):
     하위 spider는 name과 custom_settings(파이프라인 등)만 재정의하고,
     start_requests / parse는 사이트 상황에 맞춰 구현한다.
     """
-
-    name = "base"
-    custom_settings: dict[str, Any] = {}
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -50,6 +46,3 @@ class BaseSpider(scrapy.Spider):
 
     def start_requests(self):
         raise NotImplementedError(f"{type(self).__name__}.start_requests must be implemented")
-
-    def parse(self, response):
-        raise NotImplementedError(f"{type(self).__name__}.parse must be implemented")
