@@ -171,8 +171,8 @@ worker/scrapy/pipelines/mall0002/goods.py
 `worker/.env` 예시:
 
 ```env
-CELERY_BROKER_URL=amqp://admin:%21dnjs12@rabbitmq:5672//
-CELERY_RESULT_BACKEND=db+mysql+pymysql://admin:%21dnjs12@db:3306/celery_scrapy
+CELERY_BROKER_URL=amqp://admin:admin@rabbitmq:5672//
+CELERY_RESULT_BACKEND=db+mysql+pymysql://admin:admin@db:3306/celery_scrapy
 SCRAPY_SETTINGS_MODULE=worker.scrapy.settings
 
 DB_HOST=db
