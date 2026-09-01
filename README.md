@@ -1,6 +1,21 @@
 # FastAPI + Celery + Scrapy
 
-FastAPI로 크롤링 요청을 받고, RabbitMQ를 Celery broker로 사용하며, Celery Worker에서 Scrapy spider를 실행하는 비동기 크롤링 아키텍처입니다.
+FastAPI로 크롤링 요청을 받고, RabbitMQ를 Celery broker로 사용하며, Celery Worker에서 Scrapy spider를 실행하는 비동기 크롤링 애플리케이션입니다.
+
+Docker Compose 실행 방법은 프로젝트 루트 [`README.md`](../README.md)를 참고하세요.
+
+## 현재 구현
+
+- [x] FastAPI API
+- [x] Celery 연동
+- [x] RabbitMQ
+- [x] Redis
+- [x] Scrapy
+- [x] BaseSpider 구조
+- [x] Docker Compose
+- [ ] 작업 종류별 Queue 분리
+- [ ] Main DB / Customer DB
+- [ ] Scrapy Pipeline DB 저장
 
 ## 전체 흐름
 
@@ -11,140 +26,178 @@ sequenceDiagram
     participant RabbitMQ
     participant CeleryWorker
     participant Scrapy
+    participant MySQL
 
-    Client->>FastAPI: POST /crawl {url, spider}
-    FastAPI->>RabbitMQ: run_spider.delay(...)
+    Client->>FastAPI: POST /do {task_type, spider_params, ...}
+    FastAPI->>RabbitMQ: do_spider.delay(payload)
     FastAPI-->>Client: {task_id}
     RabbitMQ->>CeleryWorker: task 수신
-    CeleryWorker->>Scrapy: CrawlerProcess 실행
+    CeleryWorker->>Scrapy: mall_id + task_type으로 spider 실행
     Scrapy-->>CeleryWorker: 수집 결과
+    CeleryWorker->>MySQL: task result 저장
     Client->>FastAPI: GET /tasks/{task_id}
     FastAPI-->>Client: status + result
 ```
 
 | 구성 요소 | 역할 |
 |-----------|------|
-| **FastAPI** | HTTP API, Celery task enqueue, task 상태 조회 |
+| **FastAPI** (`app/`) | HTTP API, Celery task enqueue, task 상태 조회 |
 | **RabbitMQ** | Celery broker (메시지 큐) |
-| **Celery Worker** | task 실행, Scrapy spider 구동 |
-| **Redis** (권장) | Celery result backend (task 결과/상태 저장) |
+| **Celery Worker** (`worker/`) | task 실행, Scrapy spider 구동 |
+| **MySQL** | Celery result backend (`db+mysql+pymysql://...`) |
+| **Redis** | Compose에 포함 (추가 용도 확장 가능) |
 
-## 권장 디렉터리 구조
+## 디렉터리 구조
 
 ```
-fastapi_celery_scrapy/
-├── app/
-│   ├── main.py              # FastAPI 앱
-│   ├── api/
-│   │   └── routes.py        # /crawl, /tasks/{id}
-│   ├── celery_app.py        # Celery 인스턴스
-│   └── tasks.py             # Celery task 정의
-├── scraper/
-│   ├── settings.py          # Scrapy settings
-│   └── spiders/
-│       └── example.py
-├── rabbitmq/
-│   └── enabled_plugins    # [rabbitmq_management].
-├── docker-compose.yml
-├── Dockerfile
-├── requirements.txt
+src/
+├── app/                          # FastAPI
+│   ├── main.py
+│   ├── schemas.py                # 요청/응답 스키마
+│   └── api/
+│       └── routes.py             # POST /do, GET /tasks/{id}
+├── worker/                       # Celery + Scrapy
+│   ├── celery_app.py
+│   ├── celeryconfig.py
+│   ├── tasks.py                  # do_spider task
+│   ├── db.py                     # SQLAlchemy DB 헬퍼
+│   ├── .env                      # broker, result backend, DB, Scrapy settings
+│   └── scrapy/
+│       ├── settings.py
+│       ├── spiders/
+│       │   ├── __init__.py       # BaseSpider
+│       │   └── mall0001/
+│       │       ├── order.py
+│       │       └── goods.py
+│       └── pipelines/
+│           ├── __init__.py       # BasePipeline
+│           └── mall0001/
+│               ├── order.py
+│               └── goods.py
+├── env.py
 └── .env
 ```
 
-## Scrapy + Celery 연동 (핵심)
+## API
 
-Scrapy는 Twisted reactor를 사용하기 때문에 Celery worker 설정이 중요합니다.
+### POST /do
 
-| 방식 | 장점 | 단점 |
-|------|------|------|
-| **CrawlerProcess in task** (권장) | 코드로 제어, 결과 반환 쉬움 | worker당 reactor 0회 제한 |
-| `subprocess: scrapy crawl` | 단순 | 결과 파싱/에러 처리 번거로움 |
-| **Scrapyd** 별도 서비스 | 대규모/운영에 유리 | 구성 복잡 |
+주문(`order`) 또는 상품(`goods`) 수집 요청을 Celery task 하나로 전달합니다.
 
-초기 구성에는 **CrawlerProcess in Celery task** 방식을 권장합니다.
+```json
+{
+  "customer_id": "asdf",
+  "customer_name": "테스트",
+  "task_type": "order",
+  "period": {
+    "start_date": "20260815",
+    "end_date": "20260825"
+  },
+  "spider_params": [
+    {
+      "mall_id": "mall0001",
+      "user_id": "user1"
+    },
+    {
+      "mall_id": "mall0001",
+      "user_id": "user2",
+      "goods_list": [
+        { "goods_id": "1", "option_id": [1, 2] }
+      ]
+    }
+  ]
+}
+```
 
-Worker 실행 시 reactor 충돌을 피하려면 `--pool=solo`를 사용하세요.
+- `task_type: "order"` → `period.start_date`, `period.end_date` 필수 (YYYYMMDD)
+- `task_type: "goods"` → `period` 선택
+- `spider_params[].goods_list` → 상품 수집 시 사용
+
+응답: `{ "task_id": "...", "status": "PENDING" }`
+
+### GET /tasks/{task_id}
+
+Celery task 상태 및 결과 조회 (MySQL result backend).
+
+## Celery + Scrapy 연동
+
+### Task 실행 (`worker/tasks.py`)
+
+1. `payload.spider_params`를 순회
+2. 각 param의 `mall_id` + payload의 `task_type`으로 spider 클래스 탐색  
+   → `worker.scrapy.spiders.{mall_id}.{task_type}`
+3. `billiard.Process` + `CrawlerProcess`로 spider 실행 (reactor 충돌 방지)
+4. 모든 프로세스 `join()` 후 payload 반환
+
+Worker는 `--pool=solo`로 실행합니다.
 
 ```bash
-celery -A app.celery_app worker --pool=solo -l info
+celery -A worker.celery_app worker --pool=solo -l info
 ```
 
-## 핵심 코드 예시
+### Spider 구조 (`BaseSpider`)
 
-### Celery 설정 (`app/celery_app.py`)
+하위 mall spider는 `name`, `custom_settings`(파이프라인)만 정의하고, `start_requests` / `parse`를 mall별로 구현합니다.
 
-```python
-from celery import Celery
+공통으로 `self`에 다음이 설정됩니다.
 
-celery_app = Celery(
-    "scraper",
-    broker="amqp://guest:guest@rabbitmq:5671//",
-    backend="redis://redis:6378/0",
-    include=["app.tasks"],
-)
+- `customer_id`, `customer_name`, `task_type`
+- `mall_id`, `user_id`, `spider_param`, `goods_list`
+- `self.db` — `worker.db.Database` 인스턴스
+
+새 mall 추가 예:
+
+```
+worker/scrapy/spiders/mall0002/order.py
+worker/scrapy/spiders/mall0002/goods.py
+worker/scrapy/pipelines/mall0002/order.py
+worker/scrapy/pipelines/mall0002/goods.py
 ```
 
-### Celery Task (`app/tasks.py`)
+### Pipeline 구조 (`BasePipeline`)
 
-```python
-from scrapy.crawler import CrawlerProcess
-from scrapy.utils.project import get_project_settings
-from app.celery_app import celery_app
+- `open_spider` — DB 연결, spider 컨텍스트(customer/mall/user) 저장
+- `close_spider` — `flush()` 후 DB 연결 종료
+- `process_item` / `flush` — mall별 pipeline에서 구현 (DB 저장 예정)
 
-@celery_app.task(bind=True)
-def run_spider(self, spider_name: str, url: str):
-    from scraper.spiders.example import ExampleSpider
+## 환경 변수
 
-    settings = get_project_settings()
-    process = CrawlerProcess(settings)
-    results = []
+| 파일 | 용도 |
+|------|------|
+| `src/.env` | 앱 공통 (선택) |
+| `src/worker/.env` | Celery broker/backend, Scrapy settings, DB 접속 |
+| `../.env` (프로젝트 루트) | Docker Compose — RabbitMQ, MySQL 컨테이너 |
 
-    class ResultSpider(ExampleSpider):
-        def parse(self, response):
-            item = {"url": response.url, "title": response.css("title::text").get()}
-            results.append(item)
-            return item
+`worker/.env` 예시:
 
-    process.crawl(ResultSpider, start_urls=[url])
-    process.start()  # blocking — solo pool에서 0 task씩 실행
+```env
+CELERY_BROKER_URL=amqp://admin:%21dnjs12@rabbitmq:5672//
+CELERY_RESULT_BACKEND=db+mysql+pymysql://admin:%21dnjs12@db:3306/celery_scrapy
+SCRAPY_SETTINGS_MODULE=worker.scrapy.settings
 
-    return {"task_id": self.request.id, "items": results}
+DB_HOST=db
+DB_PORT=3306
+DB_NAME=celery_scrapy
+DB_USER=admin
+DB_PASSWORD=!dnjs12
 ```
 
-### FastAPI 라우트 (`app/api/routes.py`)
+## 로컬 실행 (Docker 없이)
 
-```python
-from fastapi import APIRouter
-from celery.result import AsyncResult
-from app.tasks import run_spider
-from app.celery_app import celery_app
+```bash
+cd src
 
-router = APIRouter()
+# FastAPI
+uvicorn app.main:app --reload
 
-@router.post("/crawl")
-def start_crawl(url: str, spider: str = "example"):
-    task = run_spider.delay(spider, url)
-    return {"task_id": task.id}
-
-@router.get("/tasks/{task_id}")
-def get_task_status(task_id: str):
-    result = AsyncResult(task_id, app=celery_app)
-    return {
-        "task_id": task_id,
-        "status": result.status,
-        "result": result.result if result.ready() else None,
-    }
+# Celery Worker (별도 터미널, RabbitMQ·MySQL 필요)
+celery -A worker.celery_app worker --pool=solo -l info
 ```
 
-### Scrapy Spider (`scraper/spiders/example.py`)
+## 향후 작업
 
-```python
-import scrapy
-
-class ExampleSpider(scrapy.Spider):
-    name = "example"
-
-    def __init__(self, start_urls=None, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.start_urls = start_urls or []
-```
+| 항목 | 설명 |
+|------|------|
+| **작업 종류별 Queue 분리** | `order` / `goods` 등 task_type별 Celery queue·worker 분리 (`celeryconfig.task_routes` 확장) |
+| **Main DB / Customer DB** | 고객별 DB 분리, spider/pipeline에서 customer_id 기준 라우팅 |
+| **Scrapy Pipeline DB 저장** | `BasePipeline.flush()`에 실제 INSERT/UPSERT 구현, mall별 테이블 스키마 정의 |
