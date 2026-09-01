@@ -13,7 +13,7 @@ Docker Compose 실행 방법은 프로젝트 루트 [`README.md`](../README.md)�
 - [x] Scrapy
 - [x] BaseSpider 구조
 - [x] Docker Compose
-- [ ] 작업 종류별 Queue 분리
+- [x] 작업 종류별 Queue 분리
 - [ ] Main DB / Customer DB
 - [ ] Scrapy Pipeline DB 저장
 
