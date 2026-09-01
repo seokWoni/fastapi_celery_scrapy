@@ -10,7 +10,10 @@ router = APIRouter()
 
 @router.post("/do", response_model=DoResponse)
 def do(payload: DoRequest) -> DoResponse:
-    task = do_spider.delay(payload.model_dump())
+    task = do_spider.apply_async(
+        args=[payload.model_dump()],
+        queue=f"{payload.task_type}_queue"
+    )
     return DoResponse(task_id=task.id, status=task.status)
 
 

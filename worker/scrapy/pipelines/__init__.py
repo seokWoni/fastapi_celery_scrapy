@@ -13,6 +13,7 @@ class BasePipeline:
     """
 
     def __init__(self):
+        self.crawler = None
         self.db = Database()
         self.buffer: list[dict[str, Any]] = []
         self.customer_id: str | None = None
@@ -22,10 +23,16 @@ class BasePipeline:
 
     @classmethod
     def from_crawler(cls, crawler):
-        return cls()
+        pipeline = cls()
+        pipeline.crawler = crawler
+        return pipeline
 
-    def open_spider(self, spider) -> None:
-        # spider가 이미 Database를 들고 있으면 같은 인스턴스를 공유한다
+    @property
+    def spider(self):
+        return self.crawler.spider
+
+    def open_spider(self) -> None:
+        spider = self.spider
         if getattr(spider, "db", None) is not None:
             self.db = spider.db
 
@@ -39,18 +46,19 @@ class BasePipeline:
             "%s open_spider: mall_id=%s user_id=%s", type(self).__name__, self.mall_id, self.user_id
         )
 
-    def close_spider(self, spider) -> None:
+    def close_spider(self) -> None:
+        spider = self.spider
         try:
-            self.flush(spider)
+            self.flush()
         finally:
             self.db.close()
             spider.logger.info(
                 "%s close_spider: items=%s", type(self).__name__, getattr(spider, "item_count", 0)
             )
 
-    def process_item(self, item, spider):
+    def process_item(self, item):
         return item
 
-    def flush(self, spider) -> None:
+    def flush(self) -> None:
         """buffer에 쌓인 항목을 저장한다. 저장이 필요한 pipeline에서 구현한다."""
         self.buffer.clear()

@@ -37,13 +37,14 @@ HTTPCACHE_DIR = "httpcache"
 ITEM_PIPELINES = {}
 
 # 로그
-LOG_LEVEL = "INFO"
+LOG_ENABLED = True
+LOG_LEVEL = "DEBUG"
+LOG_STDOUT = True
 LOG_FORMAT = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
 
 # Celery worker에서 CrawlerProcess로 실행하므로 종료 시그널은 Celery가 관리한다
 TELNETCONSOLE_ENABLED = False
 
-# Scrapy 2.x 신규 기본값 (deprecation 경고 방지)
+# Scrapy 2.x
 REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
-TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"

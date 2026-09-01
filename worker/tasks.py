@@ -1,74 +1,23 @@
 import importlib
 import inspect
-
 from copy import deepcopy
 from typing import Any
 
-from billiard import Process
 from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 
 from worker.celery_app import celery_app
 from worker.scrapy.spiders import BaseSpider
 
-def _run_crawl(spider_cls: Any, params: dict[str, Any]) -> None:
-    """billiard Process용 탑레벨 함수 (바인드 메서드는 pickle 이슈 있음)."""
-    crawler = CrawlerProcess(get_project_settings())
-    crawler.crawl(spider_cls, **params)
-    crawler.start()
 
-class RunCrawlerProcess:
-    def __init__(self, spider_cls: Any | None = None):
-        self.spider_cls = spider_cls
+def _run_crawl(spider_cls: type[BaseSpider], params: dict[str, Any]) -> None:
+    """Celery worker(--pool=solo)에서 CrawlerProcess를 직접 실행한다."""
+    process = CrawlerProcess(get_project_settings())
+    process.crawl(spider_cls, **params)
+    process.start()
 
-    def crawl(self, params: dict[str, Any]) -> Process:
-        if self.spider_cls is None:
-            raise ValueError("spider_cls is required")
 
-        process = Process(
-            target=_run_crawl,
-            args=(self.spider_cls, params),
-        )
-        process.start()
-
-        return process
-
-@celery_app.task(bind=True)
-def do_spider(self, payload: dict[str, Any]):
-    task_type = payload.get("task_type", None)
-
-    if task_type is None:
-        raise ValueError(f"unknown spider: {task_type}")
-
-    spider_params = payload.get("spider_params", [])
-    if not spider_params:
-        raise ValueError(f"spider_params is required when task_type is {task_type}")
-
-    processes = []
-    for spider_param in spider_params:
-        base_params = deepcopy(payload)
-        base_params.pop("spider_params", None)
-        base_params["spider_param"] = spider_param
-        mall_id = spider_param.get("mall_id", None)
-
-        spdier_cls = get_spider_cls(
-            mall_id, 
-            task_type
-        )
-
-        crawler_process = RunCrawlerProcess(
-            spider_cls=spdier_cls
-        )
-        process = crawler_process.crawl(base_params)
-        processes.append(process)
-
-    for process in processes:
-        process.join()
-
-    return payload
-
-# spider class를 가져오는 함수
-def get_spider_cls(mall_id: str, task_type: str) -> Any:
+def get_spider_cls(mall_id: str, task_type: str) -> type[BaseSpider]:
     module_path = f"worker.scrapy.spiders.{mall_id}.{task_type}"
 
     try:
@@ -79,5 +28,31 @@ def get_spider_cls(mall_id: str, task_type: str) -> Any:
     for _, obj in inspect.getmembers(module, inspect.isclass):
         if issubclass(obj, BaseSpider) and obj is not BaseSpider and obj.__module__ == module_path:
             return obj
-    else:
-        raise ValueError(f"BaseSpider subclass not found in {module_path}")
+
+    raise ValueError(f"BaseSpider subclass not found in {module_path}")
+
+
+@celery_app.task(bind=True)
+def do_spider(self, payload: dict[str, Any]):
+    task_type = payload.get("task_type")
+    if task_type is None:
+        raise ValueError("task_type is required")
+
+    spider_params = payload.get("spider_params", [])
+    if not spider_params:
+        raise ValueError(f"spider_params is required when task_type is {task_type}")
+
+    for spider_param in spider_params:
+        mall_id = spider_param.get("mall_id")
+        if not mall_id:
+            raise ValueError("mall_id is required in spider_param")
+
+        spider_cls = get_spider_cls(mall_id, task_type)
+
+        crawl_params = deepcopy(payload)
+        crawl_params.pop("spider_params", None)
+        crawl_params["spider_param"] = spider_param
+
+        _run_crawl(spider_cls, crawl_params)
+
+    return payload

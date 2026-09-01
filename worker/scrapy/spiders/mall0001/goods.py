@@ -1,3 +1,5 @@
+import json
+
 import scrapy
 
 from worker.scrapy.spiders import BaseSpider
@@ -8,7 +10,7 @@ class GoodsSpider(BaseSpider):
 
     custom_settings = {
         "ITEM_PIPELINES": {
-            "worker.scrapy.pipelines.mall0001.GoodsPipeline": 300,
+            "worker.scrapy.pipelines.mall0001.goods.GoodsPipeline": 300,
         },
     }
 
@@ -20,6 +22,6 @@ class GoodsSpider(BaseSpider):
         response_body = response.body.decode(response.encoding)
         response_json = json.loads(response_body)
 
-        return {
+        yield {
             "goods": response_json,
         }
